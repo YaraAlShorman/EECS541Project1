@@ -1,19 +1,38 @@
 const byte tx_pin = PD2;
-
+byte bytes = 0;
 void setup() {
   pinMode(tx_pin, OUTPUT);
   Serial.begin(9600);
   Serial.println("Now transmitting");
+
+
+  String data = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer ac augue a nibh scelerisque interdum ac id magna. Nulla blandit semper tortor, a sollicitudin ligula efficitur quis. Vivamus quis metus eu quam tincidunt feugiat. Fusce posuere elementum lectus in eleifend. Praesent porta neque metus, ut condimentum augue pulvinar non. Ut id venenatis nibh. Quisque condimentum pellentesque mauris lacinia scelerisque.";
+
+
+  for(int i=0; i<data.length(); i++){
+
+    char myChar = data.charAt(i);
+    
+      for(int i=7; i>=0; i--){
+        bytes = bitRead(myChar,i);
+        //Serial.print(bytes, BIN);
+      }
+
+      //Serial.println("");
+  }
 }
 
-// HIGH = 1
-// LOW = 0
 int signal = HIGH;
 
-// String data = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer ac augue a nibh scelerisque interdum ac id magna. Nulla blandit semper tortor, a sollicitudin ligula efficitur quis. Vivamus quis metus eu quam tincidunt feugiat. Fusce posuere elementum lectus in eleifend. Praesent porta neque metus, ut condimentum augue pulvinar non. Ut id venenatis nibh. Quisque condimentum pellentesque mauris lacinia scelerisque."
-
 void loop() {
-  signal = !signal;
-  digitalWrite(tx_pin, signal);
-  delayMicroseconds(200); // a period of 800us for a bit tranmission rate of approx 1200 bits/s
+  int count = 0;
+  while (count < byte.length()){
+    digitalWrite(tx_pin, bytes);
+    Serial.print(bytes, BIN);
+    bytes >> 1;
+    count
+  }
+  // signal = !signal;
+  // digitalWrite(tx_pin, signal);
+  // delayMicroseconds(400); // a period of 800us for a bit tranmission rate of approx 1200 bits/s
 }
