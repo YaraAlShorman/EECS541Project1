@@ -1,15 +1,6 @@
+#include <arduino-timer.h>
+
 const int rx_pin = PC2;
-
-#define BIT_DELAY_us 200
-#define PACKET_BYTES 8
-
-int threshold = 512;
-int signal;
-byte packet[PACKET_BYTES] = {0};
-byte data_buffer = 0;
-
-int bit_error_count;
-int error_count_start_ms;
 
 // Hamming [8,4] extended-parity decoding
 // High nybble : # of bit errors detected
@@ -33,76 +24,85 @@ const byte hamming_to_nybble[256] = {
 	0x2c, 0x18, 0x11, 0x2f, 0x1a, 0x2f, 0x2f, 0x1f, 0x1c, 0x2f, 0x2f, 0x1f, 0x2f, 0x1f, 0x1f, 0x0f, 
 };
 
+Timer<1, micros> timer;
+
+#define BIT_DELAY_us 400
+#define PACKET_BYTES 8
+
+int threshold = 512;
+byte data_buffer = 0;
+byte data = 0;
+int packet_index = 0;
+
+// int bit_error_count;
+// int error_count_start_ms;
+
+bool sync_done;
+
+int min = 1024, max = 0, bit_count = 0;
+bool receive_bit() {
+  bit_count++;
+  int signal = analogRead(rx_pin);
+
+  if ( !sync_done ) {
+    if ( signal < min ) { min = signal; }
+    if ( signal > max ) { max = signal; }
+    if ( bit_count == 1000 ) {
+      threshold = min + (max - min)*3/4;
+      sync_done = true;
+    }
+  } else {
+    data_buffer <<= 1;
+    data_buffer |= (signal > threshold);
+  }
+
+  return true; // continue forever
+}
+
 void setup() {
-    pinMode(rx_pin, INPUT_PULLUP);
-    Serial.begin(9600);
-    Serial.println("receiver initialized\nsynchronizing...");
-
-    // TODO: establish threshold
-    // TODO: align clock to waveform extrema
-
-    Serial.println("sync done");
+  pinMode(rx_pin, INPUT_PULLUP);
+  Serial.begin(115200);
+  // set up fast ADC mode
+  ADCSRA = (ADCSRA & 0xf8) | 0x04; // set 16 times division
+  Serial.println("receiver initialized");
+  timer.every( BIT_DELAY_us, receive_bit );
 }
 
-byte receiveByte() {
-    byte code, result;
-
-    // read next *two* bytes of Hamming [8,4]-encoded data to get *one* byte of data
-    for ( int i = 0; i < 8; ++i ) {
-        signal = analogRead(rx_pin);
-        data_buffer <<= 1;
-        data_buffer |= (signal > threshold ? 1 : 0);
-        delayMicroseconds( BIT_DELAY_us );
-    }
-    code = hamming_to_nybble[data_buffer];
-
-    bit_error_count += (code >> 4);
-    result = (code & 0x0F);
-    result << 4;
-
-    Serial.print(code, HEX);
-    Serial.print(" : ");
-
-    for ( int i = 0; i < 8; ++i ) {
-        signal = analogRead(rx_pin);
-        data_buffer <<= 1;
-        data_buffer |= (signal > threshold ? 1 : 0);
-        delayMicroseconds( BIT_DELAY_us );
-    }
-    code = hamming_to_nybble[data_buffer];
-
-    bit_error_count += (code >> 4);
-    result |= (code & 0x0F);
-
-    Serial.println(code, HEX);
-
-    return result;
-}
-
-// !!! TODO !!! :
-// Convert this to use an interrupt-based timer callback, or otherwise compute the appropriate delay?
-//
-// Currently, it takes a *significant* amount of time to process each incoming bit,
-//   enough that a substatial proportion of the BIT_DELAY_us period has already been
-//   consumed, creating a very large desync of the analogRead frequency compared with
-//   the actual frequency of the bitstream, leading in turn to an absurd bit error rate.
-
-// Also TODO: display the bit error rate somehow
+bool readingPacket = false;
+bool firstNybble = true;
 
 void loop() {
-    // read 1 bit into the buffer
-    signal = analogRead(rx_pin);
-    data_buffer <<= 1;
-    data_buffer |= (signal > threshold ? 1 : 0);
-    delayMicroseconds( BIT_DELAY_us );
+  timer.tick();
 
-    // check for packet header
-    if ( data_buffer == 0xFF ) {
-        // read a packet's worth of data
-        for ( int i = 0; i < PACKET_BYTES; ++i ) {
-            packet[i] = receiveByte();
-        }
-        // and push it to Serial out
-        // Serial.write(packet, PACKET_BYTES);
+  if ( !readingPacket && data_buffer == 0xFF ) {
+    readingPacket = true;
+    packet_index = 0;
+    bit_count = 0;
+    data = 0;
+    // Serial.println("packet:");
+  } else if ( readingPacket && bit_count == 8 ) {
+
+    if ( firstNybble ) {
+      // Serial.print( data_buffer, HEX );
+      // Serial.print(":");
+      byte nybble = hamming_to_nybble[data_buffer];
+      data = nybble << 4;
+      // bit_error_count += (nybble >> 4);
+    } else {
+      // Serial.print( data_buffer, HEX );
+      // Serial.print("|");
+      byte nybble = hamming_to_nybble[data_buffer];
+      data |= (nybble & 0x0F);
+      Serial.print( (char)data );
+      // Serial.println(data, HEX);
+      // bit_error_count += (nybble >> 4);
+      packet_index++;
     }
+
+    firstNybble = !firstNybble;
+    bit_count = 0;
+    if ( packet_index == 8 ) {
+      readingPacket = false;
+    }
+  }
 }
